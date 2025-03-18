@@ -65,6 +65,7 @@ def main():
     ds = ds.shuffle(seed=args.seed).select(range(args.num_samples))
 
     model_name = os.path.basename(args.model)
+    quant_name = f"{model_name}-{args.quantization}"
 
     if args.quantization == "awq-int4":
         from awq import AutoAWQForCausalLM
@@ -92,7 +93,6 @@ def main():
             max_calib_seq_len=args.seq_length,
         )
 
-        quant_name = f"{model_name}-{args.quantization}"
         model.save_quantized(quant_name)
         tokenizer.save_pretrained(quant_name)
     elif args.quantization in ["gptq-int4", "gptq-int8"]:
@@ -116,7 +116,6 @@ def main():
         # TODO what should batch size be?
         model.quantize(ds, batch_size=1)
 
-        quant_name = f"{model_name}-{args.quantization}"
         model.save_quantized(quant_name)
         tokenizer.save_pretrained(quant_name)
     elif args.quantization in ["w4a16-int4", "w8a8-int8", "w8a8-fp8"]:
@@ -153,9 +152,8 @@ def main():
             num_calibration_samples=args.num_samples,
         )
 
-        quant_name = f"{model_name}-{args.quantization}"
-        model.save_pretrained(save_path)
-        tokenizer.save_pretrained(save_path)
+        model.save_pretrained(quant_name)
+        tokenizer.save_pretrained(quant_name)
     else:
         raise NotImplementedError(args.quantization)
 
