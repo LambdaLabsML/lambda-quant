@@ -88,10 +88,30 @@ def main():
         quant_name = f"{model_name}-AWQ"
         model.save_quantized(quant_name)
         tokenizer.save_pretrained(quant_name)
-    elif args.quantization == "gptq-int4":
-        raise NotImplementedError(args.quantization)
-    elif args.quantization == "gptq-int8":
-        raise NotImplementedError(args.quantization)
+    elif args.quantization in ["gptq-int4", "gptq-int8"]:
+        from auto_gptq import AutoGPTQForCausalLM, BaseQuantizeConfig
+
+        quant_config = BaseQuantizeConfig(
+            bits=4 if "int4" in args.quantize else 8,
+            group_size=128,
+            desc_act=False,
+        )
+
+        with device:
+            model = AutoGPTQForCausalLM.from_pretrained(
+                pretrained_model_dir,
+                quant_config,
+                use_cache=False,
+                attn_implementation="flash_attention_2",
+            )
+
+        ds = ds.map(tokenize, remove_columns=ds.column_names).to_list()
+        # TODO what should batch size be?
+        model.quantize(ds, batch_size=1)
+
+        quant_name = f"{model_name}-GPTQ-Int{quant_config.bits}"
+        model.save_quantized(quant_name)
+        tokenizer.save_pretrained(quant_name)
     else:
         raise NotImplementedError(args.quantization)
 
