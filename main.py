@@ -4,7 +4,7 @@ import logging
 
 import torch
 import datasets
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 
 LOGGER = logging.getLogger(__name__)
@@ -17,7 +17,14 @@ def main():
     parser.add_argument(
         "-q",
         "--quantization",
-        choices=["awq-int4", "gptq-int8", "gptq-int4", "fp8", "fp8-dynamic"],
+        choices=[
+            "awq-int4",
+            "gptq-int8",
+            "gptq-int4",
+            "w4a16-int4",
+            "w8a8-int8",
+            "w8a8-fp8",
+        ],
         required=True,
     )
     parser.add_argument("-m", "--model", default=None, required=True)
@@ -85,7 +92,7 @@ def main():
             max_calib_seq_len=args.seq_length,
         )
 
-        quant_name = f"{model_name}-AWQ"
+        quant_name = f"{model_name}-{args.quantization}"
         model.save_quantized(quant_name)
         tokenizer.save_pretrained(quant_name)
     elif args.quantization in ["gptq-int4", "gptq-int8"]:
@@ -99,7 +106,7 @@ def main():
 
         with device:
             model = AutoGPTQForCausalLM.from_pretrained(
-                pretrained_model_dir,
+                args.model,
                 quant_config,
                 use_cache=False,
                 attn_implementation="flash_attention_2",
@@ -109,9 +116,46 @@ def main():
         # TODO what should batch size be?
         model.quantize(ds, batch_size=1)
 
-        quant_name = f"{model_name}-GPTQ-Int{quant_config.bits}"
+        quant_name = f"{model_name}-{args.quantization}"
         model.save_quantized(quant_name)
         tokenizer.save_pretrained(quant_name)
+    elif args.quantization in ["w4a16-int4", "w8a8-int8", "w8a8-fp8"]:
+        from llmcompressor.transformers import oneshot
+        from llmcompressor.modifiers.quantization import QuantizationModifier
+        from llmcompressor.modifiers.smoothquant import SmoothQuantModifier
+
+        with device:
+            model = AutoModelForCausalLM.from_pretrained(
+                args.model,
+                use_cache=False,
+                attn_implementation="flash_attention_2",
+            )
+
+        ds = ds.map(tokenize, remove_columns=ds.column_names)
+
+        oneshot(
+            model=model,
+            dataset=ds,
+            recipe=[
+                SmoothQuantModifier(smoothing_strength=0.7),
+                QuantizationModifier(
+                    targets="Linear",
+                    scheme={
+                        "w4a16-int4": "W4A16",
+                        "w8a8-int8": "W8A8",
+                        "w8a8-fp8": "FP8_DYNAMIC",
+                    }[args.quantization],
+                    ignore=["lm_head"],
+                    dampening_frac=0.1,
+                ),
+            ],
+            max_seq_length=args.seq_length,
+            num_calibration_samples=args.num_samples,
+        )
+
+        quant_name = f"{model_name}-{args.quantization}"
+        model.save_pretrained(save_path)
+        tokenizer.save_pretrained(save_path)
     else:
         raise NotImplementedError(args.quantization)
 
