@@ -93,7 +93,7 @@ def main():
         model = GPTQModel.load(args.model, dict(bits=4, group_size=128))
         ds = ds.map(preprocess)
         ds = ds.map(tokenize, remove_columns=ds.column_names)
-        model.quantize(ds.to_list(), batch_size=args.num_samples)
+        model.quantize(ds.to_list(), batch_size=32, tokenizer=tokenizer)
         model.save_quantized(quant_name)
         tokenizer.save_pretrained(quant_name)
     elif args.quantization in ["W4A16-Int4", "W8A8-Int8", "W8A8-F8"]:
