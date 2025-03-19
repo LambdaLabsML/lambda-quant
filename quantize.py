@@ -11,6 +11,7 @@ import torch
 import datasets
 import transformers
 from transformers import AutoTokenizer, AutoModelForCausalLM
+from accelerate import cpu_offload
 
 LOGGER = logging.getLogger(__name__)
 
@@ -129,6 +130,7 @@ def main():
         ds = ds.map(tokenize, remove_columns=ds.column_names)
 
         model = AutoModelForCausalLM.from_pretrained(args.model, use_cache=False)
+        cpu_offload(model, execution_device=device)
 
         oneshot(
             model=model,
@@ -150,6 +152,7 @@ def main():
         ds = ds.map(tokenize, remove_columns=ds.column_names)
 
         model = AutoModelForCausalLM.from_pretrained(args.model, use_cache=False)
+        cpu_offload(model, execution_device=device)
 
         oneshot(
             model=model,
@@ -170,6 +173,8 @@ def main():
         from llmcompressor.modifiers.quantization import QuantizationModifier
 
         model = AutoModelForCausalLM.from_pretrained(args.model, use_cache=False)
+        cpu_offload(model, execution_device=device)
+
         oneshot(
             model=model,
             recipe=QuantizationModifier(
