@@ -99,7 +99,9 @@ def main():
     elif args.quantization in ["GPTQ-Int4", "GPTQ-Int8"]:
         from gptqmodel import GPTQModel, QuantizeConfig
 
-        model = GPTQModel.load(args.model, dict(bits=4, group_size=128))
+        model = GPTQModel.load(
+            args.model, dict(bits=4 if "4" in args.quantization else 8, group_size=128)
+        )
         ds = ds.map(preprocess)
         ds = ds.map(tokenize, remove_columns=ds.column_names)
         model.quantize(ds.to_list(), batch_size=32, tokenizer=tokenizer)
