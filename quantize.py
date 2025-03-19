@@ -43,10 +43,11 @@ def main():
 
     logging.basicConfig(level=logging.INFO)
 
-    device = torch.device("cuda:0")
-    torch.cuda.set_device(device)
-
     LOGGER.info(args)
+
+    device = torch.device("cuda")
+    torch.cuda.set_device(device)
+    LOGGER.info(f"Using {device.type}:{device.index}")
 
     model_name = os.path.basename(args.model)
     quant_name = f"{model_name}-{args.quantization}"
@@ -100,7 +101,12 @@ def main():
         from gptqmodel import GPTQModel, QuantizeConfig
 
         model = GPTQModel.load(
-            args.model, dict(bits=4 if "4" in args.quantization else 8, group_size=128)
+            args.model,
+            QuantizeConfig(
+                bits=4 if "4" in args.quantization else 8,
+                group_size=128,
+                device=device,
+            ),
         )
         ds = ds.map(preprocess)
         ds = ds.map(tokenize, remove_columns=ds.column_names)
