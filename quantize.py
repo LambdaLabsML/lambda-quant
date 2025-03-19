@@ -45,7 +45,13 @@ def main():
 
     LOGGER.info(args)
 
-    device = torch.device("cuda")
+    visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES")
+    LOGGER.info(f"CUDA_VISIBLE_DEVICES={visible_devices}")
+    if visible_devices is not None:
+        index = visible_devices.split(",")[0]
+        device = torch.device(f"cuda:{index}")
+    else:
+        device = torch.device("cuda:0")
     torch.cuda.set_device(device)
     LOGGER.info(f"Using {device.type}:{device.index}")
 
