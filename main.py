@@ -1,11 +1,15 @@
 import argparse
 import os
 import logging
+import shutil
+import subprocess
+import sys
+import json
 
+import huggingface_hub
 import torch
 import datasets
 from transformers import AutoTokenizer, AutoModelForCausalLM
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -34,6 +38,7 @@ def main():
     parser.add_argument("--num-samples", default=128, type=int)
     parser.add_argument("--seq-length", default=512, type=int)
     parser.add_argument("--seed", default=0, type=int)
+    parser.add_argument("--metadata-only", default=False, action="store_true")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
@@ -42,6 +47,13 @@ def main():
     torch.cuda.set_device(device)
 
     LOGGER.info(args)
+
+    model_name = os.path.basename(args.model)
+    quant_name = f"{model_name}-{args.quantization}"
+
+    write_metadata(args, quant_name)
+    if args.metadata_only:
+        return
 
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
 
@@ -61,9 +73,6 @@ def main():
 
     ds = datasets.load_dataset(args.dataset, args.dataset_name, split=args.split)
     ds = ds.shuffle(seed=args.seed).select(range(args.num_samples))
-
-    model_name = os.path.basename(args.model)
-    quant_name = f"{model_name}-{args.quantization}"
 
     if args.quantization == "AWQ-Int4":
         from awq import AutoAWQForCausalLM
@@ -133,6 +142,62 @@ def main():
         tokenizer.save_pretrained(quant_name)
     else:
         raise NotImplementedError(args.quantization)
+
+
+def write_metadata(args, metdata_dir):
+    os.makedirs(metdata_dir, exist_ok=True)
+    hf_cache_dir = huggingface_hub.snapshot_download(args.model, allow_patterns="*.md")
+    for fname in os.listdir(hf_cache_dir):
+        if fname.endswith("md"):
+            LOGGER.info(f"Copying {hf_cache_dir}/{fname} into {metdata_dir}")
+            shutil.copy(
+                os.path.join(hf_cache_dir, fname),
+                os.path.join(metdata_dir, fname),
+            )
+
+    if "AWQ" in args.quantization:
+        import awq
+
+        quantization_library = f"autoawq=={awq.__version__}"
+    elif "GPTQ" in args.quantization:
+        import gptqmodel
+
+        quantization_library = f"gptqmodel=={gptqmodel.__version__}"
+    else:
+        import llmcompressor
+
+        quantization_library = f"llmcompressor=={llmcompressor.__version__}"
+    LOGGER.info(f"Using {quantization_library}")
+
+    commit_hash = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
+    LOGGER.info(f"Commit {commit_hash}")
+
+    new_lines = [
+        "# Quantization",
+        f"Created with [lambda-quant](https://github.com/LambdaLabsML/lambda-quant/tree/{commit_hash})\n",
+        f"Quantized using `{quantization_library}`\n",
+        f"`Python {sys.version}`\n",
+        f"Steps to create:",
+        f"1. `git clone https://github.com/LambdaLabsML/lambda-quant`",
+        f"2. `git checkout {commit_hash}`",
+        f"3. `python {' '.join(sys.argv)}`",
+        "# Original README.md:\n",
+    ]
+    new_content = "\n".join(new_lines)
+    LOGGER.info(f"Writing {new_content} into README.md")
+    with open(f"{metdata_dir}/README.md") as fp:
+        readme_content = fp.read()
+    with open(f"{metdata_dir}/README.md", "w") as fp:
+        fp.write(new_content + readme_content)
+
+    LOGGER.info(f"Dumping `pip freeze` to {metdata_dir}/requirements.txt")
+    freeze = subprocess.check_output(["pip", "freeze"]).decode()
+    with open(f"{metdata_dir}/requirements.txt", "w") as fp:
+        fp.write(freeze)
+
+    LOGGER.info(f"Dumping `args` to {metdata_dir}/lambda-quant-args.json")
+    with open(f"{metdata_dir}/lambda-quant-args.json", "w") as fp:
+        json.dump(vars(args), fp)
 
 
 if __name__ == "__main__":
