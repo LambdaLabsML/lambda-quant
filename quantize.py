@@ -9,6 +9,7 @@ import json
 import huggingface_hub
 import torch
 import datasets
+import transformers
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 LOGGER = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ def main():
     parser.add_argument("--dataset-name", default=None)
     parser.add_argument("--num-samples", default=128, type=int)
     parser.add_argument("--seq-length", default=512, type=int)
+    parser.add_argument("-b", "--batch-size", default=1, type=int)
     parser.add_argument("--seed", default=0, type=int)
     parser.add_argument("--metadata-only", default=False, action="store_true")
     args = parser.parse_args()
@@ -78,14 +80,17 @@ def main():
 
     if args.quantization == "AWQ-Int4":
         from awq import AutoAWQForCausalLM
+        import transformers
+        from packaging.version import Version
 
-        with device:
-            model = AutoAWQForCausalLM.from_pretrained(
-                args.model,
-                low_cpu_mem_usage=True,
-                use_cache=False,
-                attn_implementation="flash_attention_2",
+        if Version(transformers.__version__) > Version("4.47.1"):
+            raise ValueError(
+                "There's currently a bug in autoawq with newer transformers versions. Please downgrade to 4.47.1"
             )
+
+        model = AutoAWQForCausalLM.from_pretrained(
+            args.model, low_cpu_mem_usage=True, use_cache=False
+        )
 
         ds = ds.map(preprocess, remove_columns=ds.column_names)
         ds = [q["text"] for q in ds]
@@ -95,6 +100,7 @@ def main():
             calib_data=ds,
             max_calib_samples=args.num_samples,
             max_calib_seq_len=args.seq_length,
+            n_parallel_calib_samples=args.batch_size,
         )
         model.save_quantized(quant_name)
         tokenizer.save_pretrained(quant_name)
@@ -111,7 +117,7 @@ def main():
         )
         ds = ds.map(preprocess)
         ds = ds.map(tokenize, remove_columns=ds.column_names)
-        model.quantize(ds.to_list(), batch_size=32, tokenizer=tokenizer)
+        model.quantize(ds.to_list(), batch_size=args.batch_size, tokenizer=tokenizer)
         model.save_quantized(quant_name)
         tokenizer.save_pretrained(quant_name)
     elif args.quantization in ["W4A16-Int4", "W8A8-Int8", "W8A8-F8"]:
