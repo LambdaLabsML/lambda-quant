@@ -18,12 +18,12 @@ def main():
         "-q",
         "--quantization",
         choices=[
-            "awq-int4",
-            "gptq-int8",
-            "gptq-int4",
-            "w4a16-int4",
-            "w8a8-int8",
-            "w8a8-fp8",
+            "AWQ-Int4",
+            "GPTQ-Int8",
+            "GPTQ-Int4",
+            "W4A16-Int4",
+            "W8A8-Int8",
+            "W8A8-F8",
         ],
         required=True,
     )
@@ -59,18 +59,14 @@ def main():
             add_special_tokens=False,
         )
 
-    # ds = ds.map(tokenize, remove_columns=ds.column_names)
-
     ds = datasets.load_dataset(args.dataset, args.dataset_name, split=args.split)
     ds = ds.shuffle(seed=args.seed).select(range(args.num_samples))
 
     model_name = os.path.basename(args.model)
     quant_name = f"{model_name}-{args.quantization}"
 
-    if args.quantization == "awq-int4":
+    if args.quantization == "AWQ-Int4":
         from awq import AutoAWQForCausalLM
-
-        ds = [q["text"] for q in ds.map(preprocess, remove_columns=ds.column_names)]
 
         with device:
             model = AutoAWQForCausalLM.from_pretrained(
@@ -80,45 +76,27 @@ def main():
                 attn_implementation="flash_attention_2",
             )
 
+        ds = ds.map(preprocess, remove_columns=ds.column_names)
+        ds = [q["text"] for q in ds]
+
         model.quantize(
             tokenizer,
-            quant_config={
-                "zero_point": True,
-                "q_group_size": 128,
-                "w_bit": 4,
-                "version": "GEMM",
-            },
             calib_data=ds,
             max_calib_samples=args.num_samples,
             max_calib_seq_len=args.seq_length,
         )
-
         model.save_quantized(quant_name)
         tokenizer.save_pretrained(quant_name)
-    elif args.quantization in ["gptq-int4", "gptq-int8"]:
-        from auto_gptq import AutoGPTQForCausalLM, BaseQuantizeConfig
+    elif args.quantization in ["GPTQ-Int4", "GPTQ-Int8"]:
+        from gptqmodel import GPTQModel, QuantizeConfig
 
-        quant_config = BaseQuantizeConfig(
-            bits=4 if "int4" in args.quantize else 8,
-            group_size=128,
-            desc_act=False,
-        )
-
-        with device:
-            model = AutoGPTQForCausalLM.from_pretrained(
-                args.model,
-                quant_config,
-                use_cache=False,
-                attn_implementation="flash_attention_2",
-            )
-
-        ds = ds.map(tokenize, remove_columns=ds.column_names).to_list()
-        # TODO what should batch size be?
-        model.quantize(ds, batch_size=1)
-
+        model = GPTQModel.load(args.model, dict(bits=4, group_size=128))
+        ds = ds.map(preprocess)
+        ds = ds.map(tokenize, remove_columns=ds.column_names)
+        model.quantize(ds.to_list(), batch_size=args.num_samples)
         model.save_quantized(quant_name)
         tokenizer.save_pretrained(quant_name)
-    elif args.quantization in ["w4a16-int4", "w8a8-int8", "w8a8-fp8"]:
+    elif args.quantization in ["W4A16-Int4", "W8A8-Int8", "W8A8-F8"]:
         from llmcompressor.transformers import oneshot
         from llmcompressor.modifiers.quantization import QuantizationModifier
         from llmcompressor.modifiers.smoothquant import SmoothQuantModifier
@@ -140,12 +118,11 @@ def main():
                 QuantizationModifier(
                     targets="Linear",
                     scheme={
-                        "w4a16-int4": "W4A16",
-                        "w8a8-int8": "W8A8",
-                        "w8a8-fp8": "FP8_DYNAMIC",
+                        "W4A16-Int4": "W4A16",
+                        "W8A8-Int8": "W8A8",
+                        "W8A8-F8": "FP8_DYNAMIC",
                     }[args.quantization],
                     ignore=["lm_head"],
-                    dampening_frac=0.1,
                 ),
             ],
             max_seq_length=args.seq_length,
