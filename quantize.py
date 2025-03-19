@@ -120,39 +120,62 @@ def main():
         model.quantize(ds.to_list(), batch_size=args.batch_size, tokenizer=tokenizer)
         model.save_quantized(quant_name)
         tokenizer.save_pretrained(quant_name)
-    elif args.quantization in ["W4A16-Int4", "W8A8-Int8", "W8A8-F8"]:
+    elif args.quantization == "W4A16-Int4":
+        """See https://github.com/vllm-project/llm-compressor/tree/main/examples/quantization_w4a16"""
         from llmcompressor.transformers import oneshot
-        from llmcompressor.modifiers.quantization import QuantizationModifier
-        from llmcompressor.modifiers.smoothquant import SmoothQuantModifier
+        from llmcompressor.modifiers.quantization import GPTQModifier
 
-        with device:
-            model = AutoModelForCausalLM.from_pretrained(
-                args.model,
-                use_cache=False,
-                attn_implementation="flash_attention_2",
-            )
-
+        ds = ds.map(preprocess)
         ds = ds.map(tokenize, remove_columns=ds.column_names)
+
+        model = AutoModelForCausalLM.from_pretrained(args.model, use_cache=False)
 
         oneshot(
             model=model,
+            recipe=GPTQModifier(targets="Linear", scheme="W4A16", ignore=["lm_head"]),
             dataset=ds,
-            recipe=[
-                SmoothQuantModifier(smoothing_strength=0.7),
-                QuantizationModifier(
-                    targets="Linear",
-                    scheme={
-                        "W4A16-Int4": "W4A16",
-                        "W8A8-Int8": "W8A8",
-                        "W8A8-F8": "FP8_DYNAMIC",
-                    }[args.quantization],
-                    ignore=["lm_head"],
-                ),
-            ],
             max_seq_length=args.seq_length,
             num_calibration_samples=args.num_samples,
         )
 
+        model.save_pretrained(quant_name)
+        tokenizer.save_pretrained(quant_name)
+    elif args.quantization == "W8A8-Int8":
+        """See https://github.com/vllm-project/llm-compressor/tree/main/examples/quantization_w8a8_int8"""
+        from llmcompressor.transformers import oneshot
+        from llmcompressor.modifiers.quantization import GPTQModifier
+        from llmcompressor.modifiers.smoothquant import SmoothQuantModifier
+
+        ds = ds.map(preprocess)
+        ds = ds.map(tokenize, remove_columns=ds.column_names)
+
+        model = AutoModelForCausalLM.from_pretrained(args.model, use_cache=False)
+
+        oneshot(
+            model=model,
+            recipe=[
+                SmoothQuantModifier(smoothing_strength=0.8),
+                GPTQModifier(targets="Linear", scheme="W8A8", ignore=["lm_head"]),
+            ],
+            dataset=ds,
+            max_seq_length=args.seq_length,
+            num_calibration_samples=args.num_samples,
+        )
+
+        model.save_pretrained(quant_name)
+        tokenizer.save_pretrained(quant_name)
+    elif args.quantization == "W8A8-F8":
+        """See https://github.com/vllm-project/llm-compressor/tree/main/examples/quantization_w8a8_fp8"""
+        from llmcompressor.transformers import oneshot
+        from llmcompressor.modifiers.quantization import QuantizationModifier
+
+        model = AutoModelForCausalLM.from_pretrained(args.model, use_cache=False)
+        oneshot(
+            model=model,
+            recipe=QuantizationModifier(
+                targets="Linear", scheme="FP8_DYNAMIC", ignore=["lm_head"]
+            ),
+        )
         model.save_pretrained(quant_name)
         tokenizer.save_pretrained(quant_name)
     else:
