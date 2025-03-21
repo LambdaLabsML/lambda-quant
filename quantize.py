@@ -27,9 +27,8 @@ def main():
             "AWQ-Int4",
             "GPTQ-Int8",
             "GPTQ-Int4",
-            "W4A16-Int4",
-            "W8A8-Int8",
-            "W8A8-F8",
+            "Static-F8",
+            "Dynamic-F8",
         ],
         required=True,
     )
@@ -105,6 +104,7 @@ def main():
         )
         model.save_quantized(quant_name)
         tokenizer.save_pretrained(quant_name)
+
     elif args.quantization in ["GPTQ-Int4", "GPTQ-Int8"]:
         from gptqmodel import GPTQModel, QuantizeConfig
 
@@ -121,53 +121,8 @@ def main():
         model.quantize(ds.to_list(), batch_size=args.batch_size, tokenizer=tokenizer)
         model.save_quantized(quant_name)
         tokenizer.save_pretrained(quant_name)
-    elif args.quantization == "W4A16-Int4":
-        """See https://github.com/vllm-project/llm-compressor/tree/main/examples/quantization_w4a16"""
-        from llmcompressor.transformers import oneshot
-        from llmcompressor.modifiers.quantization import GPTQModifier
 
-        ds = ds.map(preprocess)
-        ds = ds.map(tokenize, remove_columns=ds.column_names)
-
-        model = AutoModelForCausalLM.from_pretrained(args.model, use_cache=False)
-        cpu_offload(model, execution_device=device)
-
-        oneshot(
-            model=model,
-            recipe=GPTQModifier(targets="Linear", scheme="W4A16", ignore=["lm_head"]),
-            dataset=ds,
-            max_seq_length=args.seq_length,
-            num_calibration_samples=args.num_samples,
-        )
-
-        model.save_pretrained(quant_name)
-        tokenizer.save_pretrained(quant_name)
-    elif args.quantization == "W8A8-Int8":
-        """See https://github.com/vllm-project/llm-compressor/tree/main/examples/quantization_w8a8_int8"""
-        from llmcompressor.transformers import oneshot
-        from llmcompressor.modifiers.quantization import GPTQModifier
-        from llmcompressor.modifiers.smoothquant import SmoothQuantModifier
-
-        ds = ds.map(preprocess)
-        ds = ds.map(tokenize, remove_columns=ds.column_names)
-
-        model = AutoModelForCausalLM.from_pretrained(args.model, use_cache=False)
-        cpu_offload(model, execution_device=device)
-
-        oneshot(
-            model=model,
-            recipe=[
-                SmoothQuantModifier(smoothing_strength=0.8),
-                GPTQModifier(targets="Linear", scheme="W8A8", ignore=["lm_head"]),
-            ],
-            dataset=ds,
-            max_seq_length=args.seq_length,
-            num_calibration_samples=args.num_samples,
-        )
-
-        model.save_pretrained(quant_name)
-        tokenizer.save_pretrained(quant_name)
-    elif args.quantization == "W8A8-F8":
+    elif args.quantization in ["Static-F8", "Dynamic-F8"]:
         """See https://github.com/vllm-project/llm-compressor/tree/main/examples/quantization_w8a8_fp8"""
         from llmcompressor.transformers import oneshot
         from llmcompressor.modifiers.quantization import QuantizationModifier
@@ -178,11 +133,17 @@ def main():
         oneshot(
             model=model,
             recipe=QuantizationModifier(
-                targets="Linear", scheme="FP8_DYNAMIC", ignore=["lm_head"]
+                targets="Linear",
+                scheme={
+                    "Static-F8": "FP8",
+                    "Dynamic-F8": "FP8_DYNAMIC",
+                }[args.quantization],
+                ignore=["lm_head"],
             ),
         )
         model.save_pretrained(quant_name)
         tokenizer.save_pretrained(quant_name)
+
     else:
         raise NotImplementedError(args.quantization)
 
@@ -201,15 +162,17 @@ def write_metadata(args, metdata_dir):
     if "AWQ" in args.quantization:
         import awq
 
-        quantization_library = f"autoawq=={awq.__version__}"
+        quantization_library = (
+            f"[autoawq=={awq.__version__}](https://github.com/casper-hansen/AutoAWQ)"
+        )
     elif "GPTQ" in args.quantization:
         import gptqmodel
 
-        quantization_library = f"gptqmodel=={gptqmodel.__version__}"
+        quantization_library = f"[gptqmodel=={gptqmodel.__version__}](https://github.com/ModelCloud/GPTQModel)"
     else:
         import llmcompressor
 
-        quantization_library = f"llmcompressor=={llmcompressor.__version__}"
+        quantization_library = f"[llmcompressor=={llmcompressor.__version__}](https://github.com/vllm-project/llm-compressor)"
     LOGGER.info(f"Using {quantization_library}")
 
     commit_hash = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
@@ -218,13 +181,14 @@ def write_metadata(args, metdata_dir):
     new_lines = [
         "# Quantization",
         f"Created with [lambda-quant](https://github.com/LambdaLabsML/lambda-quant/tree/{commit_hash})\n",
-        f"Quantized using `{quantization_library}`\n",
+        f"Base Model: [{args.model}](https://huggingface.co/{args.model})\n",
+        f"Quantized using {quantization_library}\n",
         f"`Python {sys.version}`\n",
         f"Steps to create:",
         f"1. `git clone https://github.com/LambdaLabsML/lambda-quant`",
         f"2. `git checkout {commit_hash}`",
         f"3. `python {' '.join(sys.argv)}`",
-        "# Original README.md:\n",
+        "# Base Model README.md\n",
     ]
     new_content = "\n".join(new_lines)
     LOGGER.info(f"Writing {new_content} into README.md")
