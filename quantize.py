@@ -36,11 +36,11 @@ def main():
     parser.add_argument("-d", "--dataset", default="HuggingFaceH4/ultrachat_200k")
     parser.add_argument("--split", default="train_sft")
     parser.add_argument("--dataset-name", default=None)
-    parser.add_argument("--num-samples", default=128, type=int)
-    parser.add_argument("--seq-length", default=512, type=int)
-    parser.add_argument("-b", "--batch-size", default=1, type=int)
+    parser.add_argument("--num-samples", default=512, type=int)
+    parser.add_argument("--seq-length", default=2048, type=int)
+    parser.add_argument("-b", "--batch-size", default=32, type=int)
     parser.add_argument("--seed", default=0, type=int)
-    parser.add_argument("--metadata-only", default=False, action="store_true")
+    parser.add_argument("--update-metadata", default=False, action="store_true")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
@@ -55,9 +55,13 @@ def main():
     model_name = os.path.basename(args.model)
     quant_name = f"{model_name}-{args.quantization}"
 
-    write_metadata(args, quant_name)
-    if args.metadata_only:
+    if args.update_metadata:
+        with open(f"{quant_name}/lambda-quant-args.json") as fp:
+            args = json.load(fp)
+        write_metadata(argparse.Namespace(**args), quant_name)
         return
+
+    write_metadata(args, quant_name)
 
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
 
@@ -180,10 +184,9 @@ def write_metadata(args, metdata_dir):
 
     new_lines = [
         "# Quantization",
-        f"Created with [lambda-quant](https://github.com/LambdaLabsML/lambda-quant/tree/{commit_hash})\n",
+        f"Created with [lambda-quant](https://github.com/LambdaLabsML/lambda-quant/tree/{commit_hash}) on `Python {sys.version}`\n",
         f"Base Model: [{args.model}](https://huggingface.co/{args.model})\n",
         f"Quantized using {quantization_library}\n",
-        f"`Python {sys.version}`\n",
         f"Steps to create:",
         f"1. `git clone https://github.com/LambdaLabsML/lambda-quant`",
         f"2. `git checkout {commit_hash}`",
