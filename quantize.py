@@ -31,34 +31,66 @@ def main():
             "Dynamic-F8",
         ],
         required=True,
+        help="The type of quantization to apply",
     )
-    parser.add_argument("-m", "--model", default=None, required=True)
-    parser.add_argument("-d", "--dataset", default="HuggingFaceH4/ultrachat_200k")
-    parser.add_argument("--split", default="train_sft")
-    parser.add_argument("--dataset-name", default=None)
-    parser.add_argument("--num-samples", default=512, type=int)
-    parser.add_argument("--seq-length", default=2048, type=int)
-    parser.add_argument("-b", "--batch-size", default=32, type=int)
-    parser.add_argument("--seed", default=0, type=int)
-    parser.add_argument("--update-metadata", default=False, action="store_true")
+    parser.add_argument(
+        "-m",
+        "--model",
+        default=None,
+        required=True,
+        help="The base model. Should be huggingface tag.",
+    )
+    parser.add_argument(
+        "--dataset", default="HuggingFaceH4/ultrachat_200k", help="Calibration data"
+    )
+    parser.add_argument(
+        "--dataset-split", default="train_sft", help="Split for calibration data"
+    )
+    parser.add_argument(
+        "--dataset-name",
+        default=None,
+        help="Name for calibration data, passed to datasets.load_dataset.",
+    )
+    parser.add_argument(
+        "--num-samples",
+        default=512,
+        type=int,
+        help="Number of items from dataset to use for calibration",
+    )
+    parser.add_argument(
+        "--seq-length",
+        default=2048,
+        type=int,
+        help="Sequence length for calibration data",
+    )
+    parser.add_argument(
+        "--batch-size",
+        default=32,
+        type=int,
+        help="Number of calibration samples to process at the same time.",
+    )
+    parser.add_argument("--update-metadata-only", default=False, action="store_true")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
 
     LOGGER.info(args)
+    LOGGER.info(os.environ)
 
-    visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES")
-    LOGGER.info(f"CUDA_VISIBLE_DEVICES={visible_devices}")
+    target_device = os.environ.get("CUDA_VISIBLE_DEVICES", "0").split(",")[0]
+    LOGGER.info(f"Using cuda:{target_device}")
+
+    # NOTE: `0` index means the first **visible** cuda device
     device = torch.device("cuda:0")
     torch.cuda.set_device(device)
 
     model_name = os.path.basename(args.model)
     quant_name = f"{model_name}-{args.quantization}"
 
-    if args.update_metadata:
+    if args.update_metadata_only:
         with open(f"{quant_name}/lambda-quant-args.json") as fp:
-            args = json.load(fp)
-        write_metadata(argparse.Namespace(**args), quant_name)
+            args = argparse.Namespace(**json.load(fp))
+        write_metadata(args, quant_name)
         return
 
     write_metadata(args, quant_name)
@@ -79,8 +111,10 @@ def main():
             add_special_tokens=False,
         )
 
-    ds = datasets.load_dataset(args.dataset, args.dataset_name, split=args.split)
-    ds = ds.shuffle(seed=args.seed).select(range(args.num_samples))
+    ds = datasets.load_dataset(
+        args.dataset, args.dataset_name, split=args.dataset_split
+    )
+    ds = ds.shuffle(seed=0).select(range(args.num_samples))
 
     if args.quantization == "AWQ-Int4":
         from awq import AutoAWQForCausalLM
@@ -154,6 +188,8 @@ def main():
 
 def write_metadata(args, metdata_dir):
     os.makedirs(metdata_dir, exist_ok=True)
+
+    LOGGER.info("Downloading base model readmes.")
     hf_cache_dir = huggingface_hub.snapshot_download(args.model, allow_patterns="*.md")
     for fname in os.listdir(hf_cache_dir):
         if fname.endswith("md"):
@@ -180,17 +216,21 @@ def write_metadata(args, metdata_dir):
     LOGGER.info(f"Using {quantization_library}")
 
     commit_hash = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
-    LOGGER.info(f"Commit {commit_hash}")
+    LOGGER.info(f"lambda-quant commit {commit_hash}")
 
     new_lines = [
         "# Quantization",
         f"Created with [lambda-quant](https://github.com/LambdaLabsML/lambda-quant/tree/{commit_hash}) on `Python {sys.version}`\n",
         f"Base Model: [{args.model}](https://huggingface.co/{args.model})\n",
         f"Quantized using {quantization_library}\n",
-        f"Steps to create:",
+        "Steps to create:",
         f"1. `git clone https://github.com/LambdaLabsML/lambda-quant`",
         f"2. `git checkout {commit_hash}`",
         f"3. `python {' '.join(sys.argv)}`",
+        "## Evaluation",
+        "TODO",
+        "## Benchmarks",
+        "TODO",
         "# Base Model README.md\n",
     ]
     new_content = "\n".join(new_lines)
@@ -200,13 +240,13 @@ def write_metadata(args, metdata_dir):
     with open(f"{metdata_dir}/README.md", "w") as fp:
         fp.write(new_content + readme_content)
 
-    LOGGER.info(f"Dumping `pip freeze` to {metdata_dir}/requirements.txt")
+    LOGGER.info(f"Dumping `pip freeze` to {metdata_dir}/requirements-lambda-quant.txt")
     freeze = subprocess.check_output(["pip", "freeze"]).decode()
-    with open(f"{metdata_dir}/requirements.txt", "w") as fp:
+    with open(f"{metdata_dir}/requirements-lambda-quant.txt", "w") as fp:
         fp.write(freeze)
 
-    LOGGER.info(f"Dumping `args` to {metdata_dir}/lambda-quant-args.json")
-    with open(f"{metdata_dir}/lambda-quant-args.json", "w") as fp:
+    LOGGER.info(f"Dumping `args` to {metdata_dir}/args-lambda-quant.json")
+    with open(f"{metdata_dir}/args-lambda-quant.json", "w") as fp:
         json.dump(vars(args), fp)
 
 
