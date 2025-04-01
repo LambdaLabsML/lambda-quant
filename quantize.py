@@ -76,7 +76,7 @@ def main():
     model_name = os.path.basename(args.model)
     quant_name = f"{model_name}-{args.quantization}"
 
-    logging.basicConfig(level=logging.INFO, filename=f"{quant_name}/log.txt")
+    logging.basicConfig(level=logging.INFO)
 
     LOGGER.info(args)
     LOGGER.info(os.environ)
