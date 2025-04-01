@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import json
+import faulthandler
 
 import huggingface_hub
 import torch
@@ -72,7 +73,10 @@ def main():
     parser.add_argument("--update-metadata-only", default=False, action="store_true")
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO)
+    model_name = os.path.basename(args.model)
+    quant_name = f"{model_name}-{args.quantization}"
+
+    logging.basicConfig(level=logging.INFO, filename=f"{quant_name}/log.txt")
 
     LOGGER.info(args)
     LOGGER.info(os.environ)
@@ -84,16 +88,11 @@ def main():
     device = torch.device("cuda:0")
     torch.cuda.set_device(device)
 
-    model_name = os.path.basename(args.model)
-    quant_name = f"{model_name}-{args.quantization}"
-
     if args.update_metadata_only:
         with open(f"{quant_name}/lambda-quant-args.json") as fp:
             args = argparse.Namespace(**json.load(fp))
         write_metadata(args, quant_name)
         return
-
-    write_metadata(args, quant_name)
 
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
 
@@ -184,6 +183,8 @@ def main():
 
     else:
         raise NotImplementedError(args.quantization)
+
+    write_metadata(args, quant_name)
 
 
 def write_metadata(args, metdata_dir):
