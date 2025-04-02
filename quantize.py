@@ -220,6 +220,9 @@ def write_metadata(args, metdata_dir):
     LOGGER.info(f"lambda-quant commit {commit_hash}")
 
     new_lines = [
+        "---",
+        f'base_model: "{args.model}"',
+        "---",
         "# Quantization",
         f"Created with [lambda-quant](https://github.com/LambdaLabsML/lambda-quant/tree/{commit_hash}) on `Python {sys.version}`\n",
         f"Base Model: [{args.model}](https://huggingface.co/{args.model})\n",
@@ -228,6 +231,7 @@ def write_metadata(args, metdata_dir):
         f"1. `git clone https://github.com/LambdaLabsML/lambda-quant`",
         f"2. `git checkout {commit_hash}`",
         f"3. `python {' '.join(sys.argv)}`",
+        "",
         "## Evaluation",
         "TODO",
         "## Benchmarks",
