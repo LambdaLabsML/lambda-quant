@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import json
+import yaml
 import faulthandler
 
 import huggingface_hub
@@ -261,6 +262,13 @@ def write_metadata(args, metdata_dir):
                 "---",
             ]
         )
+
+    metadata = yaml.safe_load(metadata.replace("---", ""))
+    if "base_model" not in metadata:
+        metadata["base_model"] = args.model
+    if "license" not in metadata:
+        metadata["license"] = "mit"
+    metadata = "---\n" + yaml.dump(metadata) + "---\n"
 
     new_content = "\n".join(new_lines)
     LOGGER.info(f"Writing {new_content} into README.md")
