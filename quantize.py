@@ -89,8 +89,9 @@ def main():
     torch.cuda.set_device(device)
 
     if args.update_metadata_only:
-        with open(f"{quant_name}/lambda-quant-args.json") as fp:
-            args = argparse.Namespace(**json.load(fp))
+        os.makedirs(quant_name, exist_ok=True)
+        # with open(f"{quant_name}/lambda-quant-args.json") as fp:
+        #     args = argparse.Namespace(**json.load(fp))
         write_metadata(args, quant_name)
         return
 
@@ -220,13 +221,13 @@ def write_metadata(args, metdata_dir):
     LOGGER.info(f"lambda-quant commit {commit_hash}")
 
     new_lines = [
-        "---",
-        f'base_model: "{args.model}"',
-        "---",
         "# Quantization",
-        f"Created with [lambda-quant](https://github.com/LambdaLabsML/lambda-quant/tree/{commit_hash}) on `Python {sys.version}`\n",
-        f"Base Model: [{args.model}](https://huggingface.co/{args.model})\n",
-        f"Quantized using {quantization_library}\n",
+        f"Created with [lambda-quant](https://github.com/LambdaLabsML/lambda-quant/tree/{commit_hash}) on `Python {sys.version}`",
+        "",
+        f"Base Model: [{args.model}](https://huggingface.co/{args.model})",
+        "",
+        f"Quantized using {quantization_library}",
+        "",
         "Steps to create:",
         f"1. `git clone https://github.com/LambdaLabsML/lambda-quant`",
         f"2. `git checkout {commit_hash}`",
@@ -234,16 +235,37 @@ def write_metadata(args, metdata_dir):
         "",
         "## Evaluation",
         "TODO",
+        "",
         "## Benchmarks",
         "TODO",
-        "# Base Model README.md\n",
+        "",
+        "# Base Model README.md",
+        "",
     ]
-    new_content = "\n".join(new_lines)
-    LOGGER.info(f"Writing {new_content} into README.md")
+
     with open(f"{metdata_dir}/README.md") as fp:
         readme_content = fp.read()
+
+    metadata_start = readme_content.find("---")
+    if metadata_start >= 0:
+        metadata_end = readme_content.find("---", metadata_start + len("---")) + len(
+            "---"
+        )
+        metadata = readme_content[metadata_start:metadata_end]
+        readme_content = readme_content[:metadata_start] + readme_content[metadata_end:]
+    else:
+        metadata = "\n".join(
+            [
+                "---",
+                f'base_model: "{args.model}"',
+                "---",
+            ]
+        )
+
+    new_content = "\n".join(new_lines)
+    LOGGER.info(f"Writing {new_content} into README.md")
     with open(f"{metdata_dir}/README.md", "w") as fp:
-        fp.write(new_content + readme_content)
+        fp.write(metadata + "\n" + new_content + "\n" + readme_content)
 
     LOGGER.info(f"Dumping `pip freeze` to {metdata_dir}/requirements-lambda-quant.txt")
     freeze = subprocess.check_output(["pip", "freeze"]).decode()
