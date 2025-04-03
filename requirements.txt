@@ -2,6 +2,6 @@ transformers==4.49.0
 torch==2.6.0
 tokenizers==0.21.1
 llmcompressor==0.4.1
-gptqmodel==2.1.0
+gptqmodel==2.2.0
 flash_attn==2.7.4.post1
 autoawq==0.2.8
