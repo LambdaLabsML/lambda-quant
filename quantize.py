@@ -127,13 +127,17 @@ def main():
                 "There's currently a bug in autoawq with newer transformers versions. Please downgrade to 4.47.1"
             )
 
+        LOGGER.info("Initializing model...")
         model = AutoAWQForCausalLM.from_pretrained(
             args.model, low_cpu_mem_usage=True, use_cache=False
         )
 
+        LOGGER.info("Initializing calibration data...")
         ds = ds.map(preprocess, remove_columns=ds.column_names)
         ds = [q["text"] for q in ds]
 
+
+        LOGGER.info("Quantizing...")
         model.quantize(
             tokenizer,
             calib_data=ds,
@@ -141,12 +145,15 @@ def main():
             max_calib_seq_len=args.seq_length,
             n_parallel_calib_samples=args.batch_size,
         )
+
+        LOGGER.info("Saving...")
         model.save_quantized(quant_name)
         tokenizer.save_pretrained(quant_name)
 
     elif args.quantization in ["GPTQ-Int4", "GPTQ-Int8"]:
         from gptqmodel import GPTQModel, QuantizeConfig
 
+        LOGGER.info("Initializing model...")
         model = GPTQModel.load(
             args.model,
             QuantizeConfig(
@@ -155,9 +162,14 @@ def main():
                 device=device,
             ),
         )
+        LOGGER.info("Initializing calibration data...")
         ds = ds.map(preprocess)
         ds = ds.map(tokenize, remove_columns=ds.column_names)
+
+        LOGGER.info("Quantizing...")
         model.quantize(ds.to_list(), batch_size=args.batch_size, tokenizer=tokenizer)
+
+        LOGGER.info("Saving...")
         model.save_quantized(quant_name)
         tokenizer.save_pretrained(quant_name)
 
@@ -166,11 +178,14 @@ def main():
         from llmcompressor.transformers import oneshot
         from llmcompressor.modifiers.quantization import QuantizationModifier
 
+        LOGGER.info("Initializing model...")
         model = AutoModelForCausalLM.from_pretrained(args.model, use_cache=False)
         cpu_offload(model, execution_device=device)
 
+        LOGGER.info("Quantizing...")
         oneshot(
             model=model,
+            tokenizer=tokenizer,
             recipe=QuantizationModifier(
                 targets="Linear",
                 scheme={
@@ -180,6 +195,8 @@ def main():
                 ignore=["lm_head"],
             ),
         )
+
+        LOGGER.info("Saving...")
         model.save_pretrained(quant_name)
         tokenizer.save_pretrained(quant_name)
 
