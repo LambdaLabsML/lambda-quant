@@ -225,14 +225,13 @@ def write_metadata(args, metdata_dir, device: torch.device):
     device_name = torch.cuda.get_device_name(device)
 
     quantization_info = [
-        f"Quantized using {quantization_library} on an {device_name}",
+        f"Quantized using {quantization_library} on an `{device_name}` GPU.",
     ]
     if "AWQ" in args.quantization or "GPTQ" in args.quantization:
         quantization_info.extend(
             [
                 "",
-                f"Calibrated with `{args.num_samples}` from `{args.dataset}`, ",
-                f"`--batch-size {args.batch_size}`, `--seq-length {args.seq_length}`",
+                f"Calibrated with `{args.num_samples}` samples from `{args.dataset}`, `--batch-size {args.batch_size}`, `--seq-length {args.seq_length}`.",
             ]
         )
 
