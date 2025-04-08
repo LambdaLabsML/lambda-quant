@@ -93,7 +93,7 @@ def main():
         os.makedirs(quant_name, exist_ok=True)
         # with open(f"{quant_name}/lambda-quant-args.json") as fp:
         #     args = argparse.Namespace(**json.load(fp))
-        write_metadata(args, quant_name)
+        write_metadata(args, quant_name, device)
         return
 
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
@@ -186,10 +186,10 @@ def main():
     else:
         raise NotImplementedError(args.quantization)
 
-    write_metadata(args, quant_name)
+    write_metadata(args, quant_name, device)
 
 
-def write_metadata(args, metdata_dir):
+def write_metadata(args, metdata_dir, device: torch.device):
     os.makedirs(metdata_dir, exist_ok=True)
 
     LOGGER.info("Downloading base model readmes.")
@@ -221,13 +221,28 @@ def write_metadata(args, metdata_dir):
     commit_hash = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
     LOGGER.info(f"lambda-quant commit {commit_hash}")
 
+    assert device.type == "cuda"
+    device_name = torch.cuda.get_device_name(device)
+
+    quantization_info = [
+        f"Quantized using {quantization_library} on an {device_name}",
+    ]
+    if "AWQ" in args.quantization or "GPTQ" in args.quantization:
+        quantization_info.extend(
+            [
+                "",
+                f"Calibrated with `{args.num_samples}` from `{args.dataset}`, ",
+                f"`--batch-size {args.batch_size}`, `--seq-length {args.seq_length}`",
+            ]
+        )
+
     new_lines = [
         "# Quantization",
         f"Created with [lambda-quant](https://github.com/LambdaLabsML/lambda-quant/tree/{commit_hash}) on `Python {sys.version}`",
         "",
         f"Base Model: [{args.model}](https://huggingface.co/{args.model})",
         "",
-        f"Quantized using {quantization_library}",
+        *quantization_info,
         "",
         "Steps to create:",
         f"1. `git clone https://github.com/LambdaLabsML/lambda-quant`",
